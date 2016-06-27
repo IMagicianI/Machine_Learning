@@ -1,0 +1,317 @@
+---
+title: "Practical_ML_Course_Project -- Wearable Computing"
+author: "Alari Varmann"
+date: "27 June 2016"
+output: html_document
+---
+  
+  
+```{r setsettings, include=F}
+knitr::opts_chunk$set(warning=F,warnings=F, message = FALSE,cache=F)
+
+```
+## Introduction
+*Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement --- a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here*: http://groupware.les.inf.puc-rio.br/har 
+
+## The Datasets
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The original article is located at
+[Wearable Computing: Accelerometersÿ Data
+Classification of Body Postures and Movements ](http://groupware.les.inf.puc-rio.br/public/papers/2012.Ugulino.WearableComputing.HAR.Classifier.RIBBON.pdf)
+
+## Task Description
+*You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did. You will also use your prediction model to predict 20 different test cases.*
+
+
+
+## Getting and Cleaning Data, Exploratory Analysis
+
+```{r libraries, include=FALSE, cache=T}
+RequireOrInstall <- function(package) {
+  suppressWarnings({
+    if (!require(package,character.only=TRUE)) {
+      install.packages(package, dep=TRUE)
+      require(package,character.only=TRUE)  
+    }})
+}
+RequireOrInstall("caret")
+RequireOrInstall("ggplot2")
+RequireOrInstall("kernlab")
+RequireOrInstall("plyr")
+RequireOrInstall("dplyr")
+
+
+
+detach_package <- function(pkg, character.only = FALSE)
+{
+  if(!character.only)
+  {
+    pkg <- deparse(substitute(pkg))
+  }
+  search_item <- paste("package", pkg, sep = ":")
+  while(search_item %in% search())
+  {
+    detach(search_item, unload = TRUE, character.only = TRUE)
+  }
+}
+
+# Now check the sessioninfo
+
+sessionInfo()
+
+```
+
+```{r reading data, dependson= "libraries", cache = T}
+
+# remove dplyr if loaded detach_package(dplyr)
+# first load plyr 
+RequireOrInstall("plyr")
+# then load dplyr
+RequireOrInstall("dplyr")
+
+# NAVIGATE TO DATASETS DIRECTORY USING setwd() command
+training <- read.csv("pml-training.csv")
+testing <- read.csv("pml-testing.csv")
+dim(training) # 19622 rows, 160 cols
+dim(testing) # 20 rows, 160 cols
+fulldata <- bind_rows(training,testing)
+
+check_for_NAs <- function(x,useceil=F){
+  if(useceil==T){
+  apply(as.data.frame(x),2,FUN=function(x){ceiling(sum(is.na(x))/length(x))})
+  } else {
+    apply(as.data.frame(x),2,FUN=function(x){sum(is.na(x))/length(x)})
+  }
+}
+
+NAs <- check_for_NAs(fulldata,useceil = T)
+NAs_w <- check_for_NAs(fulldata,useceil = F)
+NAs_n <- as.numeric(NAs) # 67 NA variables -- so we have 160 - 67 = 93 that are mostly free of NA's
+
+featuredata <- fulldata%>%select(which(NAs_n==0))
+dim(featuredata)
+# these variables have less than 50% NA variables also subsetted out
+features <- names(fulldata[,colSums(is.na(fulldata)) == 0])
+features
+length(features) # so only 59 of 93 variables contain no NA's
+
+
+
+featuredata<- subset(featuredata, select = features) 
+featuredata
+
+#dropping the features related to timeseries
+train <- as.data.frame(mutate(featuredata[1:19622,],classe=training$classe)[,c(2,8:60)])
+test <- as.data.frame(featuredata[19623:19642,c(2,8:60)])
+
+```
+
+### Data Preprocessing -- Removing Redundant Multi-Collinearities from Data
+
+I have not opted for to use the famous `Principal Component Analysis` preprocessing technique here since rotating the feature space will possibly result in a loss of descriptive power that I have not planned here. Thus, instead, I have chosen to remove the unnecessary collinearities in the data in the following way:
+
+```{r Preprocessing}
+set.seed(123)
+RequireOrInstall("caret")
+numericset_names <- names(train[,sapply(train,is.numeric)|sapply(train,is.integer)])
+
+numericset <- train[,sapply(train,is.numeric)|sapply(train,is.integer)]
+
+#findCorrelation  searches through a correlation matrix and returns a vector of integers corresponding to columns to remove to reduce pair-wise correlations.
+
+highCor_feat <- names(numericset[,findCorrelation(abs(cor(numericset)),0.88)])
+lowcor_features <- setdiff(setdiff(names(train),"classe"),highCor_feat)
+
+train_lowcor <- train[,c(lowcor_features,"classe")]
+dim(train_lowcor)
+
+#### ----------- 19623:19642 TESTING, the rest TRAINING ---------- ########
+
+inTrain <- createDataPartition(train_lowcor$classe, p = 0.6, list = F)
+train_ = train[inTrain,]
+validate_ = train[-inTrain,]
+classe_idx = which(names(train) == "classe") # index 54 corresponds to classe
+str(train_)
+dim(validate_)
+
+```
+
+
+## Machine Learning Modeling
+
+
+I used the default `randomForest` settings to build a classification algorithm -- since it is a very powerful nonlinear model with potentially low bias, and the variance of which can be easily reduced using the cross-validation technique. I did not use a special cross validation set in parallel mode as I had split the training data into training and validation sets (60\% and 40\% of the initial training data size respectively), but I also performed cross validation for the random forest in serial mode.
+ 
+
+I experimented with RandomForest and Support Vector Machine (SVM) classifiers. 
+
+I tried out a few runs of SVM, the first one with a sigmoidal and linear kernels (interestingly, `parallelSVM` doesn't have a generic Gaussian kernel?), but I couldn't figure it out fast how to make the 1-hot encoding for the parallel SVM to recognize multiple class response variable -- that's probably why it only made a binary classification (like it should by default) and that's why the accuracy was only around 20\% instead of near 100 \%.
+
+What I really opted for was the `Random Forest` classifier. I had some bug that I wasn't able to fix -- for some reason, cross validation did not work for my parallel impementation of `Random Forest` -- I got some sort of confusing a runtime termination error.  But the cross validation worked nicely with the Caret package, so for the final predictions I used the random forest trained with the `randomForest` function of the `randomForest` package.
+
+
+
+```{r final models}
+printconfusion <- function(ml_model,validate_){
+confusionMatrix(predict(ml_model,validate_),validate_$classe)
+}
+RequireOrInstall <- function(package) {
+  suppressWarnings({
+    if (!require(package,character.only=TRUE)) {
+      install.packages(package, dep=TRUE)
+      require(package,character.only=TRUE)  
+    }})
+}
+RequireOrInstall("randomForest")
+RequireOrInstall("caret")
+set.seed(123)
+dim(train_)
+dim(validate_)
+
+classe_idx
+
+
+samsung.randomforest <- randomForest(train_[,-classe_idx], train_[,classe_idx], importance = T, ntree = 700, mtry =8)
+print(samsung.randomforest, digits=3)
+
+
+# PLOT TRAINING ERROR
+plot(samsung.randomforest, ylim=c(0,0.15))
+legend('topright', colnames(samsung.randomforest$err.rate), col=1:5, fill=1:5)
+
+printconfusion(samsung.randomforest,validate_)
+
+#mtry -- number of attributes randomly bootstrapped at each node
+#nodesize -- minimum size of terminal nodes
+#ntrees(howmany trees, how many computing nodes)
+timer <- proc.time()
+
+
+############ PARALLEL FOREST ################
+cores <- 4 
+RequireOrInstall("doSNOW")
+cluster1<-makeCluster(cores) #<- # of processors / hyperthreads on machine
+registerDoSNOW(cluster1)
+
+
+samsung.parallelforest <- foreach(ntree=rep(400, cores), .combine=combine,.multicombine=TRUE,.packages='randomForest') %dopar%
+randomForest(train_[,-54],train_[,54], importance = F,do.trace=TRUE,ntree=ntree, nodesize=150,mtry=8)
+
+#   command failed -- claims that response is not a factor !?
+proc.time()-timer
+
+
+printconfusion(samsung.parallelforest,validate_)
+
+#######################################
+
+# Print the Predictions 
+
+pred_rf <- predict(samsung.randomforest,newdata=test)
+pred_rf # the predictions
+
+```
+
+> We see that although `samsung.parallelforest` depicts a 4-ensemble of 400 trees random forest model, it does worse than the `samsung.randomforest` model of 700 trees. The optimal maximum node size in the parallel version seems to be definitely less than 200, it may start to overfit with a node size around 200, I believe.
+
+## Out of Sample Error
+
+Out of sample error can be defined as the error on the cases not in the training set. Since the original `testing` set here doesn't contain the true labels, thus it will be impossible to estimate the Out-of-sample error beforehand. To be able to give an estimate for it, I split the initial training set randomly into two -- into training and validation sets and I use the validation set records to estimate the out of sample error. Since the error and accuracy sum up to 1, the out-of-bag error is 0.0059.
+
+## Visualizing the most important features in the Random Forest Classifier
+```{r Visualizing Random Forest results}
+
+RequireOrInstall("plyr")
+RequireOrInstall("dplyr")
+RequireOrInstall("ggplot2")
+importance <- varImp(samsung.randomforest)
+importance <- data.frame(Variables = row.names(importance),
+                        Importance = round(samsung.randomforest$importance[ ,'MeanDecreaseGini'],2))
+
+# Create a rank variable based on decreasing importance
+rankImportance <- (importance %>%
+  mutate(Rank =dense_rank(desc(Importance))))%>%arrange(Rank)
+first7 <- rankImportance[1:7,1]
+inImp = createDataPartition(train_$classe, p = 0.05)[[1]]
+
+featurePlot(train_[inImp,first7],train_$classe[inImp], plot = "pairs", xlab="Most Important Variables",ylab="Activity Type (Classe)")
+
+
+# Use ggplot2 to visualize the relative importance of variables
+ggplot(rankImportance[1:7,], aes(x = reorder(Variables, Importance), 
+    y = Importance)) +
+  geom_bar(stat='identity', colour = 'green') +
+  geom_text(aes(x = Variables, y = 0.5, label = Rank),
+    hjust=0, vjust=0.55, size = 4, colour = 'lavender',
+    fontface = 'bold') +
+  labs(x = 'Variables', title = 'Relative Variable Importance') +
+  coord_flip()
+```
+
+### Example of the tree rules for the 500'th tree in the random forest classifier
+```{r randomforest rule printout, echo=FALSE }
+#**************************
+#return the rules of a tree
+#**************************
+getConds<-function(tree){
+  #store all conditions into a list
+  conds<-list()
+  #start by the terminal nodes and find previous conditions
+  id.leafs<-which(tree$status==-1)
+	  j<-0
+	  for(i in id.leafs){
+		j<-j+1
+		prevConds<-prevCond(tree,i)
+		conds[[j]]<-prevConds$cond
+		while(prevConds$id>1){
+		  prevConds<-prevCond(tree,prevConds$id)
+		  conds[[j]]<-paste(conds[[j]]," & ",prevConds$cond)
+		  if(prevConds$id==1){
+			conds[[j]]<-paste(conds[[j]]," => ",tree$prediction[i])
+        break()
+      }
+    }
+
+  }
+
+  return(conds)
+}
+
+#**************************
+#find the previous conditions in the tree
+#**************************
+prevCond<-function(tree,i){
+  if(i %in% tree$right_daughter){
+		id<-which(tree$right_daughter==i)
+		cond<-paste(tree$split_var[id],">",tree$split_point[id])
+	  }
+	  if(i %in% tree$left_daughter){
+    id<-which(tree$left_daughter==i)
+		cond<-paste(tree$split_var[id],"<",tree$split_point[id])
+  }
+
+  return(list(cond=cond,id=id))
+}
+
+#remove spaces in a word
+collapse<-function(x){
+  x<-sub(" ","_",x)
+
+  return(x)
+}
+
+tree <- randomForest::getTree(samsung.randomforest,k=500, labelVar=TRUE)
+
+#rename the name of the column
+colnames(tree)<-sapply(colnames(tree),collapse)
+rules<-getConds(tree)
+print(rules[[1]])
+```
