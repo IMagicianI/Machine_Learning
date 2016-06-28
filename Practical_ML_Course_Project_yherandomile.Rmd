@@ -1,7 +1,7 @@
 ---
 title: "Practical_ML_Course_Project -- Wearable Computing"
 author: "Alari Varmann"
-date: "27 June 2016"
+date: "28 June 2016"
 output: html_document
 ---
   
@@ -136,9 +136,10 @@ dim(train_lowcor)
 #### ----------- 19623:19642 TESTING, the rest TRAINING ---------- ########
 
 inTrain <- createDataPartition(train_lowcor$classe, p = 0.6, list = F)
-train_ = train[inTrain,]
-validate_ = train[-inTrain,]
-classe_idx = which(names(train) == "classe") # index 54 corresponds to classe
+train_ = train_lowcor[inTrain,]
+validate_ = train_lowcor[-inTrain,]
+classe_idx = which(names(train_) == "classe") 
+classe_idx #index corresponds to classe
 str(train_)
 dim(validate_)
 
@@ -203,7 +204,7 @@ registerDoSNOW(cluster1)
 
 
 samsung.parallelforest <- foreach(ntree=rep(400, cores), .combine=combine,.multicombine=TRUE,.packages='randomForest') %dopar%
-randomForest(train_[,-54],train_[,54], importance = F,do.trace=TRUE,ntree=ntree, nodesize=150,mtry=8)
+randomForest(train_[,-classe_idx],train_[,classe_idx], importance = F,do.trace=TRUE,ntree=ntree, nodesize=150,mtry=8)
 
 #   command failed -- claims that response is not a factor !?
 proc.time()-timer
@@ -224,7 +225,7 @@ pred_rf # the predictions
 
 ## Out of Sample Error
 
-Out of sample error can be defined as the error on the cases not in the training set. Since the original `testing` set here doesn't contain the true labels, thus it will be impossible to estimate the Out-of-sample error beforehand. To be able to give an estimate for it, I split the initial training set randomly into two -- into training and validation sets and I use the validation set records to estimate the out of sample error. So I could say that the out-of-the-bag error is either 1- accuracy of the model on the validation set or the mean of the cross validation errors (when using `method=cv` of the `caret` package).
+Out of sample error can be defined as the error on the cases not in the training set. Since the original `testing` set here doesn't contain the true labels, thus it will be impossible to estimate the Out-of-sample error beforehand. To be able to give an estimate for it, I split the initial training set randomly into two -- into training and validation sets and I use the validation set records to estimate the out of sample error. So I could say that the out-of-the-bag error is either 1- accuracy of the model on the validation set (here: 1-0.9921=0.0079) or the cross validation error. OOB is also estimated when running the `randomForest` algorithm of the `randomForest` package.
 
 ## Visualizing the most important features in the Random Forest Classifier
 ```{r Visualizing Random Forest results}
@@ -315,3 +316,8 @@ colnames(tree)<-sapply(colnames(tree),collapse)
 rules<-getConds(tree)
 print(rules[[1]])
 ```
+
+
+## Remarks
+
+Removing the 7 multicollinear features (that is, using `train_lowcor`) from the training set lowered the accuracy of the classification by 0.0017 in the best scenario (from 0.9938 to 0.9921), which conveys the point that when one has built a  versatile classifier (which the random forest is), compressing the feature space 3.5 times may not reduce the selected classification metric (e.g. accuracy) almost by any significant margin. Thus, the effective dimensionality reduction performed is from 159-dimensional to 46-dimensional feature space while achieving 99.3\% of accuracy on the validation set. Thus, for me, the project has fulfilled its purpose.
