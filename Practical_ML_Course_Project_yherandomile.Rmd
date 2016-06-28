@@ -155,8 +155,7 @@ I experimented with RandomForest and Support Vector Machine (SVM) classifiers.
 
 I tried out a few runs of SVM, the first one with a sigmoidal and linear kernels (interestingly, `parallelSVM` doesn't have a generic Gaussian kernel?), but I couldn't figure it out fast how to make the 1-hot encoding for the parallel SVM to recognize multiple class response variable -- that's probably why it only made a binary classification (like it should by default) and that's why the accuracy was only around 20\% instead of near 100 \%.
 
-What I really opted for was the `Random Forest` classifier. I had some bug that I wasn't able to fix -- for some reason, cross validation did not work for my parallel impementation of `Random Forest` -- I got some sort of confusing a runtime termination error.  But the cross validation worked nicely with the Caret package, so for the final predictions I used the random forest trained with the `randomForest` function of the `randomForest` package.
-
+What I really opted for was the `Random Forest` classifier. I had some bug that I wasn't able to fix -- for some reason, cross validation did not work for my parallel impementation of `Random Forest` -- I got some sort of confusing a runtime termination error.  But the cross validation worked nicely with the Caret package, so I used cross-validation with the `train` function of `Caret`.
 
 
 ```{r final models}
@@ -178,8 +177,9 @@ dim(validate_)
 
 classe_idx
 
+samsung.randomforest2 <-train(train_[,-classe_idx],train_[,classe_idx],method="rf",trControl=trainControl(method="cv",number=5))
 
-samsung.randomforest <- randomForest(train_[,-classe_idx], train_[,classe_idx], importance = T, ntree = 700, mtry =8)
+samsung.randomforest <- randomForest(train_[,-classe_idx], train_[,classe_idx], importance = T, ntree = 700 )
 print(samsung.randomforest, digits=3)
 
 
@@ -215,7 +215,7 @@ printconfusion(samsung.parallelforest,validate_)
 
 # Print the Predictions 
 
-pred_rf <- predict(samsung.randomforest,newdata=test)
+pred_rf <- predict(samsung.randomforest2,newdata=test)
 pred_rf # the predictions
 
 ```
@@ -224,7 +224,7 @@ pred_rf # the predictions
 
 ## Out of Sample Error
 
-Out of sample error can be defined as the error on the cases not in the training set. Since the original `testing` set here doesn't contain the true labels, thus it will be impossible to estimate the Out-of-sample error beforehand. To be able to give an estimate for it, I split the initial training set randomly into two -- into training and validation sets and I use the validation set records to estimate the out of sample error. Since the error and accuracy sum up to 1, the out-of-bag error is 0.0059.
+Out of sample error can be defined as the error on the cases not in the training set. Since the original `testing` set here doesn't contain the true labels, thus it will be impossible to estimate the Out-of-sample error beforehand. To be able to give an estimate for it, I split the initial training set randomly into two -- into training and validation sets and I use the validation set records to estimate the out of sample error. So I could say that the out-of-the-bag error is either 1- accuracy of the model on the validation set or the mean of the cross validation errors (when using `method=cv` of the `caret` package).
 
 ## Visualizing the most important features in the Random Forest Classifier
 ```{r Visualizing Random Forest results}
